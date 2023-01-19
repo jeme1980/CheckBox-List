@@ -1,0 +1,227 @@
+=============================================================================================================
+step 1: create 3 class
+=============================================================================================================
+public class Student
+    {
+        [Key,DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public int StudentId { get; set; }
+        [Required]
+        [Display(Name ="student name")]
+        public string? StudentFirstName { get; set;}
+        [Required]
+        public string? StudentLasttName { get; set; }
+        public ICollection<StudentHoppy> studentHoppies { get; set; }
+    }
+    
+public class Hoppy
+    {
+        public int Id { get; set; }
+        public string? Name { get; set; }
+        public ICollection<HoppyUser>? HoppyUser { get; set; }
+        public ICollection<StudentHoppy> studentHoppies { get; set; }
+    }
+    
+public class StudentHoppy
+    {
+        [ForeignKey("Hoppy")]
+        public int HoppyId { get; set; }
+        [ForeignKey("Student")]
+        public int? StudentId { get; set; }
+        public Hoppy? Hoppy { get; set; }
+        public Student? Student { get; set; }
+    }
+=============================================================================================================
+step 2: go to application dbcontext and add:
+=============================================================================================================
+builder.Entity<StudentHoppy>()
+        .HasKey(sc => new { sc.StudentId, sc.HoppyId });
+
+            builder.Entity<StudentHoppy>()
+                .HasOne(sc => sc.Student)
+                .WithMany(s => s.studentHoppies)
+                .HasForeignKey(sc => sc.StudentId);
+
+            builder.Entity<StudentHoppy>()
+                .HasOne(sc => sc.Hoppy)
+                .WithMany(c => c.studentHoppies)
+                .HasForeignKey(sc => sc.HoppyId);
+public DbSet<Student>? Students { get; set; }
+        public DbSet<HoppyUser>? HoppyUsers { get; set; }
+        public DbSet<StudentHoppy>? StudentHoppies { get; set; }
+ =============================================================================================================       
+step 3: create folder with the name viewmodel and add:
+=============================================================================================================
+public class HoppyChBoxVM
+    {
+        public int Id { get; set; }
+        public string? Name { get; set; }
+        public bool IsCheaked { get; set; }
+    }
+    
+public class CreateStudentVM
+    {
+        public int StudentId { get; set; }
+        [Required]
+        [Display(Name = "student name")]
+        public string? StudentFirstName { get; set; }
+        [Required]
+        public string? StudentLasttName { get; set; }
+        public List<HoppyChBoxVM>? HoppyChBoxVMs { get; set; }
+    }
+    
+step 4: controller
+
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.EntityFrameworkCore;
+using MyNotesApp.Data;
+using MyNotesApp.Models;
+using MyNotesApp.Utilites;
+using MyNotesApp.ViewModel;
+using System.Linq;
+
+namespace MyNotesApp.Controllers
+{
+    public class StudentController : Controller
+    {
+        private readonly ApplicationDbContext _context;
+
+        public StudentController(ApplicationDbContext context)
+        {
+            _context = context;
+        }
+        public async Task<IActionResult> Index()
+        {
+            var students = _context.Students.Include(h => h.studentHoppies).ThenInclude(s => s.Hoppy).AsNoTracking().ToList();
+            return View(students);
+        }
+        [HttpGet]
+        public IActionResult Edit(int? id) 
+        {
+            var item = _context.Students.Include(h => h.studentHoppies).ThenInclude(s => s.Hoppy).FirstOrDefault(x => x.StudentId == id);
+            if (item == null)
+                return NotFound();
+            
+            CreateStudentVM vm = new CreateStudentVM()
+            {
+                StudentId = item.StudentId,
+                StudentFirstName = item.StudentFirstName,
+                StudentLasttName = item.StudentLasttName,
+                HoppyChBoxVMs = _context.Hoppies.Select(h => new HoppyChBoxVM
+                {
+                    Id = h.Id,
+                    Name = h.Name,
+                    IsCheaked = h.studentHoppies.Any(x => x.StudentId == item.StudentId) ? true : false
+                }).ToList()
+            };
+            return View(vm);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Edit(CreateStudentVM vm)
+        {
+            List<StudentHoppy> lstSH = new List<StudentHoppy>();
+            Student student = _context.Students.Where(x => x.StudentId == vm.StudentId).Include(h => h.studentHoppies).ThenInclude(s => s.Hoppy).FirstOrDefault();
+            if (student == null)
+                return NotFound();
+            foreach (var item in student.studentHoppies)
+            {
+                _context.StudentHoppies.Remove(item);
+            }
+            await _context.SaveChangesAsync();
+
+            if (ModelState.IsValid)
+            {
+                student.StudentLasttName = vm.StudentLasttName;
+                student.StudentFirstName = vm.StudentFirstName;
+                _context.Students.Update(student);
+                await _context.SaveChangesAsync();
+                foreach (var item in vm.HoppyChBoxVMs)
+                {
+                    if (item.IsCheaked)
+                    {
+                        lstSH.Add(new StudentHoppy { StudentId = student.StudentId, HoppyId = item.Id });
+                    };
+                };
+                await _context.StudentHoppies.AddRangeAsync(lstSH);
+                await _context.SaveChangesAsync();
+                return RedirectToAction("Index");
+            }
+          
+            return View(vm);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Delete(int? id)
+        {
+            Student student = _context.Students.Where(x => x.StudentId == id).Include(h => h.studentHoppies).ThenInclude(s => s.Hoppy).FirstOrDefault();
+            if (student == null)
+                return NotFound();
+            foreach (var item in student.studentHoppies)
+            {
+                _context.StudentHoppies.Remove(item);
+            }
+            _context.Students.Remove(student);
+            await _context.SaveChangesAsync();
+            return RedirectToAction("Index");
+        }
+    }
+}
+
+step 4: edit view:
+@model MyNotesApp.ViewModel.CreateStudentVM
+
+@{
+    ViewData["Title"] = "Create";
+}
+
+<section>
+    <div class="container">
+        <div class="row">
+            <div class="col-md-6 offset-3 border rounded shadow py-3">
+                <form asp-action="Edit">
+                    <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                    <input hidden asp-for="StudentId" />
+                    <div class="mb-3">
+                        <label asp-for="StudentFirstName" class="control-label"></label>
+                        <input asp-for="StudentFirstName" class="form-control" />
+                        <span asp-validation-for="StudentFirstName" class="text-danger"></span>
+                    </div>
+                    <div class="mb-3">
+                        <label asp-for="StudentLasttName" class="control-label"></label>
+                        <input asp-for="StudentLasttName" class="form-control" />
+                        <span asp-validation-for="StudentLasttName" class="text-danger"></span>
+                    </div>
+
+                    <div class="mb-3">
+                        @for (int i = 0; i < Model.HoppyChBoxVMs.Count; i++)
+                        {
+                            <div class="form-check m-1">
+                                <input type="hidden" asp-for="@Model.HoppyChBoxVMs[i].Id" />
+                                <input type="hidden" asp-for="@Model.HoppyChBoxVMs[i].Name" />
+                                <input asp-for="@Model.HoppyChBoxVMs[i].IsCheaked" class="form-check-input" />
+                                <label class="form-check-label" asp-for="@Model.HoppyChBoxVMs[i].IsCheaked">
+                                    @Model.HoppyChBoxVMs[i].Name
+                                </label>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="mt-3 d-flex justify-content-between">
+                        <input type="submit" value="Update" class="btn btn-primary" style="width:200px" />
+                        <a asp-action="Index" class="btn btn-info" style="width:200px">Back to List</a>
+                    </div>
+
+                </form>
+            </div>
+        </div>
+    </div>
+</section>
+
+@section scripts{
+    @{
+        await Html.RenderPartialAsync("_ValidationScriptsPartial");
+    }
+}
+    
